@@ -350,6 +350,7 @@ type Server struct {
 	listeners           map[listenKey]*listener
 	nextEphemeralPort   uint16 // next port to try in ephemeral range; 0 means use ephemeralPortFirst
 	fallbackTCPHandlers set.HandleSet[FallbackTCPHandler]
+	fallbackUDPHandlers set.HandleSet[FallbackUDPHandler]
 	dialer              *tsdial.Dialer
 	advertisedServices  map[tailcfg.ServiceName]int
 	closeOnce           sync.Once
@@ -1296,6 +1297,13 @@ func (s *Server) getTCPHandlerForFlow(src, dst netip.AddrPort) (handler func(net
 func (s *Server) getUDPHandlerForFlow(src, dst netip.AddrPort) (handler func(nettype.ConnPacketConn), intercept bool) {
 	ln, ok := s.listenerForDstAddr("udp", dst, false)
 	if !ok {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, fallback := range s.fallbackUDPHandlers {
+			if handler, intercept := fallback(src, dst); intercept {
+				return handler, true
+			}
+		}
 		return nil, true // don't handle, don't forward to localhost
 	}
 	return func(c nettype.ConnPacketConn) { ln.handle(c) }, true
